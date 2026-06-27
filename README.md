@@ -21,7 +21,7 @@ A Flask-based backend service for ingesting, validating, classifying, and storin
 
 ### Prerequisites
 
-- Python 3.10+
+- Python 3.10+ (required for type hint syntax `str | None`)
 - MySQL 5.7+
 - pip
 
