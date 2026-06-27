@@ -5,9 +5,9 @@ Endpoints:
 - GET /leads - Retrieve leads (with optional filtering)
 """
 
-# ============================================================================
-# IMPORTS
-# ============================================================================
+# -----------------------------------------
+# Import Libraries
+# -----------------------------------------
 
 from flask import Flask, request, jsonify
 from sqlalchemy import create_engine, text
@@ -16,15 +16,14 @@ import phonenumbers
 import re
 from config import DB_CONNECTION, CLASSIFICATION_RULES, PHONE_DEFAULT_REGION
 
-# ============================================================================
-# FLASK APP SETUP
-# ============================================================================
+# -----------------------------------------
+# Setup Configs
+# 1. flask app
+# 2. database URL 
+# -----------------------------------------
 
 app = Flask(__name__)
 
-# ============================================================================
-# DATABASE SETUP - create_engine
-# ============================================================================
 
 # Build the database URL from config dictionary
 # Note: Database is NOT specified here, will be specified in each query
@@ -36,10 +35,13 @@ DATABASE_URL = (
 # Create the engine - this is your connection to MySQL
 engine = create_engine(DATABASE_URL, echo=False)
 
-# ============================================================================
-# DATABASE CONNECTION CHECK - FAIL FAST
-# ============================================================================
 
+# -----------------------------------------
+# Functions
+# -----------------------------------------
+
+# ****************************
+# Database connection testing !
 def test_database_connection() -> bool:
     """
     Test database connection at startup
@@ -54,30 +56,9 @@ def test_database_connection() -> bool:
     except Exception as e:
         return False
 
-# Check connection at startup - STOP if it fails
-if not test_database_connection():
-    print("\n" + "="*60)
-    print("✗ CRITICAL ERROR: Database Connection Failed")
-    print("="*60)
-    print("\nReason: Cannot connect to MySQL database")
-    print("Please check:")
-    print("  1. MySQL server is running")
-    print("  2. Database 'leads_db' exists")
-    print("  3. Username/password in config.py are correct")
-    print("  4. Host/port in config.py are correct")
-    print("\nConnection Details:")
-    print(f"  Host: {DB_CONNECTION['host']}")
-    print(f"  Port: {DB_CONNECTION['port']}")
-    print(f"  User: {DB_CONNECTION['user']}")
-    print(f"  Database: leads_db (checked in queries)")
-    print("="*60 + "\n")
-    exit(1)  # ← STOP the app, exit with error code 1
 
-print("✓ Database connection successful!")
-
-# ============================================================================
-# HELPER FUNCTIONS - VALIDATION, PHONE NORMALIZATION, CLASSIFICATION
-# ============================================================================
+# ****************************
+# Validation, Normalisation, Classification
 
 def normalize_phone(phone: str, region: str = PHONE_DEFAULT_REGION) -> tuple[str | None, str | None]:
     """
@@ -195,9 +176,8 @@ def classify_lead(message: str) -> str:
     # Everything else is cold
     return 'cold'
 
-# ============================================================================
-# DATABASE OPERATIONS - CRUD Functions
-# ============================================================================
+# ****************************
+# Database Functions
 
 def check_database_connection() -> bool:
     """
@@ -384,7 +364,6 @@ def insert_failed_lead(name: str | None, phone: str | None, message: str | None,
         print(f"✗ Error inserting failed lead: {e}")
         return False
 
-
 def get_failed_leads() -> list[dict[str, any]] | None:
     """
     Retrieve all failed leads from the database
@@ -419,9 +398,53 @@ def get_failed_leads() -> list[dict[str, any]] | None:
         return None
     
 
-# ============================================================================
-# FLASK ENDPOINTS
-# ============================================================================
+# -----------------------------------------
+# !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+# This runs BEFORE any Flask endpoints are registered.
+# 
+# CRITICAL DESIGN: If database connection fails, the ENTIRE APP EXITS.
+# 
+# Reason:
+# - A lead is only valuable if we can persist it to the database
+# - If database is down (no connection), accepting leads and dropping them is worse than rejecting upfront
+# - Fail-fast: reject requests immediately rather than silently losing data
+# - Sales team needs to know the system is down, not wonder why leads disappear
+#
+# The app will only start if:
+#   1. MySQL server is running
+#   2. Database 'leads_db' exists
+#   3. Connection credentials (host, user, password, port) are correct
+#
+# If any of these fail, we print a clear error and exit(1) immediately.
+# -----------------------------------------
+if not check_database_connection():
+    print("\n" + "="*60)
+    print("✗ CRITICAL ERROR: Database Connection Failed")
+    print("="*60)
+    print("\nReason: Cannot connect to MySQL database")
+    print("Please check:")
+    print("  1. MySQL server is running")
+    print("  2. Database 'leads_db' exists")
+    print("  3. Username/password in config.py are correct")
+    print("  4. Host/port in config.py are correct")
+    print("\nConnection Details:")
+    print(f"  Host: {DB_CONNECTION['host']}")
+    print(f"  Port: {DB_CONNECTION['port']}")
+    print(f"  User: {DB_CONNECTION['user']}")
+    print(f"  Database: leads_db (checked in queries)")
+    print("="*60 + "\n")
+    exit(1)
+
+print("✓ Database connection successful!")
+
+
+# -----------------------------------------
+# Flask Endpoints
+# 1. /leads          - POST
+# 2. /leads          - GET
+# 3. /health         - GET
+# 4. /failed_leads   - GET
+# -----------------------------------------
 
 @app.route('/leads', methods=['POST'])
 def create_lead():
@@ -590,10 +613,14 @@ def get_failed_leads_endpoint() -> tuple[dict, int]:
     }), 200
 
 
-# ============================================================================
-# ERROR HANDLERS
-# ============================================================================
+# -----------------------------------------
+# Error Handlers
+# 1. 404 - not found, endpoint do not exists
+# 2. 405 - wrong http method
+# 3. 500 - internal server error, code crashes
+# -----------------------------------------
 
+# For the app itself , not the leads X
 @app.errorhandler(404)
 def not_found(error):
     """Handle 404 errors"""
@@ -609,20 +636,20 @@ def server_error(error):
     """Handle 500 errors"""
     return jsonify({"error": "Internal server error"}), 500
 
-# ============================================================================
-# MAIN
-# ============================================================================
+
+# -----------------------------------------
+# Main [Where the magic happens !]
+# -----------------------------------------
 
 if __name__ == '__main__':
-    print("\n" + "="*60)
+    print("\n" + "-"*60)
     print("Starting Flask Leads API - ABC Sales AI Assessment")
-    print("="*60)
     print("\nAvailable Endpoints:")
     print("  POST /leads              - Create a new lead")
     print("  GET /leads               - List all leads")
     print("  GET /leads?status=hot    - List only hot leads")
     print("  GET /health              - Health check")
-    print("\nRunning on http://localhost:5000")
-    print("="*60 + "\n")
-    
+    print("\nRunning on http://localhost:5000\n")
+
+    # Run the app, using port 5000
     app.run(debug=True, host='localhost', port=5000)
