@@ -49,6 +49,7 @@ pip install -r requirements.txt
 
 ```bash
 # 1. Create database and tables
+## Create leads_db schema and leads, failed_leads tables
 mysql -u root -p < schema.sql
 
 # 2. Update config.py with your MySQL credentials
@@ -56,6 +57,26 @@ mysql -u root -p < schema.sql
 #   DB_CONNECTION['host'] = 'your_host'
 #   DB_CONNECTION['user'] = 'your_user'
 #   DB_CONNECTION['password'] = 'your_password'
+```
+
+### Optional: Setup Ollama (For Part B LLM Extraction)
+
+```bash
+# Download phi model (~1.6GB)
+ollama pull phi
+
+# Keep Ollama running in separate terminal
+ollama serve
+```
+
+### Optional: Setup Claude API (For Part B LLM Extraction)
+
+```bash
+# Set environment variable (Windows PowerShell)
+$env:ANTHROPIC_API_KEY="sk-ant-..."
+
+# Or Linux/Mac
+export ANTHROPIC_API_KEY="sk-ant-..."
 ```
 
 ### Run the Service
@@ -68,7 +89,20 @@ py -3.12 app.py
 ```
 
 Server runs on: `http://localhost:5000`
+---
 
+### Troubleshooting
+
+**Error: "Database connection failed"**
+- Check MySQL is running: `mysql -u root -p`
+- Check config.py credentials match your MySQL setup
+
+**Error: "Port 5000 already in use"**
+- Flask is already running, or another service uses port 5000
+- Kill process: `lsof -i :5000` (Mac/Linux) or `netstat -ano | findstr :5000` (Windows)
+
+**Error: "Module not found"**
+- Install dependencies: `pip install -r requirements.txt`
 ---
 
 ## API Endpoints
@@ -258,6 +292,43 @@ To expand classification:
 ## Part B: Extensions (Planned)
 
 ### Step 4: LLM Extraction (Completed)
+### Implementation Summary
+
+**What**: Extract structured fields from free-text messages using local LLM
+
+### Current Implementation
+
+- ✅ **OllamaExtractor** (Local LLM - phi model)
+- ✅ **StubExtractor** (Deterministic fallback)
+- ✅ **AdaptiveExtractor** (Intelligent orchestration: Ollama → Stub)
+- ❌ **Claude API** (Not used - optional enhancement only)
+
+### Why Local Ollama Only?
+
+| Aspect | Ollama | Claude API |
+|--------|--------|-----------|
+| **Cost** | $0 | $0.01+ per request |
+| **Setup** | `ollama pull phi` | Requires API key |
+| **Privacy** | Data stays local | Sent to Anthropic |
+| **Speed** | ~1 sec | ~2-3 sec |
+| **Dependencies** | Self-contained | External service |
+
+**Decision**: Use local Ollama for assessment because:
+- ✅ Zero infrastructure costs
+- ✅ No external dependencies (works offline)
+- ✅ Instant feedback during testing
+- ✅ Perfect for demonstration
+
+### Optional: Add Claude Later
+
+If needed in production, Claude integration is already designed:
+```python
+extractor = AdaptiveExtractor(use_claude=True)
+# Will use: Ollama → Claude → Stub fallback
+# Requires: ANTHROPIC_API_KEY environment variable
+```
+
+But for this assessment, **Ollama alone is sufficient!**
 
 ## Fields Extracted (Part B Step 4)
 **What**: Extract structured fields from free-text messages using OLLAMA, Claude and Stub (fallback, manually designed)
