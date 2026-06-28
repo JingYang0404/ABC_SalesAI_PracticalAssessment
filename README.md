@@ -169,7 +169,7 @@ jupyter notebook test_interactive.ipynb
 - Easy to update without code changes
 
 **Database Design**
-- `leads` table: core lead data + timestamps
+- `leads` table: core lead data + timestamps + extracted fields (Part B step 4)
 - `failed_leads` table: audit trail of validation failures
 - Phone stored as original + normalized for debugging
 - Composite keys and unique constraints for data integrity
@@ -200,6 +200,59 @@ jupyter notebook test_interactive.ipynb
 | DATABASE_ERROR | 500 | Database unavailable or error |
 
 ---
+
+## Lead Classification Rules
+
+### Current Rules (Configurable)
+
+Leads are classified based on message keywords. Rules are in `config.py` for easy customization:
+
+```python
+CLASSIFICATION_RULES = {
+    'hot': {
+        'keywords': [
+            # Current
+            'urgent', 'asap', 'buy now', 'pricing', 'ready to pay', 'demo',
+            # Additional HOT signals
+            'purchase', 'implement', 'subscribe', 'license', 'contract',
+            'deploy', 'timeline', 'budget', 'roi', 'trial', 'poc',
+            'integrate', 'evaluate', 'proposal'
+        ],
+        'priority': 1
+    },
+    'warm': {
+        'keywords': [
+            # Current
+            'interested', 'tell me more', 'how does it work',
+            # Additional WARM signals
+            'curious', 'learn', 'explore', 'understand', 'consider',
+            'potential', 'benchmark', 'comparison', 'features', 'capabilities'
+        ],
+        'priority': 2
+    },
+    'cold': {
+        'keywords': [],  # Everything else
+        'priority': 3
+    }
+}
+```
+
+### Prioritization
+
+- **Hot**: Purchase intent + urgency/budget signals → Route to sales immediately
+- **Warm**: Interest signals → Schedule demo/send resources
+- **Cold**: Generic/browsing → Add to nurture sequence
+
+### Adding More Rules
+
+To expand classification:
+
+1. Edit `config.py` → Add keywords to any tier
+2. Keywords are matched case-insensitive
+3. Hot takes priority over warm, warm over cold
+4. Example: Add `'contract'`, `'integrate'`, `'deploy'` to HOT keywords for higher precision
+
+**Note**: Classification can be enhanced with real sales data (e.g., "which keywords correlate with won deals?")
 
 
 ## Part B: Extensions (Planned)
