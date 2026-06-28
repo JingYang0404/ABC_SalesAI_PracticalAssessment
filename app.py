@@ -16,6 +16,8 @@ import phonenumbers
 import re
 from config import DB_CONNECTION, CLASSIFICATION_RULES, PHONE_DEFAULT_REGION
 from llm_extraction import AdaptiveExtractor
+import json
+from config import DB_CONNECTION
 
 # -----------------------------------------
 # Setup Configs
@@ -202,7 +204,7 @@ def check_database_connection() -> bool:
         print(f"✗ Database connection check failed: {e}")
         return False
 
-def insert_lead(name: str, phone_e164: str, message: str, classification: str) -> int | None:
+def insert_lead(name: str, phone_e164: str, message: str, classification: str, extracted_data: dict | None = None) -> int | None:
     """
     Insert a successful lead into the leads table
     
@@ -236,9 +238,13 @@ def insert_lead(name: str, phone_e164: str, message: str, classification: str) -
                 'name': name,
                 'phone_e164': phone_e164,
                 'message': message,
-                'classification': classification
+                'classification': classification,
+                'intent': extracted_data.get('intent') if extracted_data else None,
+                'product_interest': extracted_data.get('product_interest') if extracted_data else None,
+                'entities': json.dumps(extracted_data.get('entities', [])) if extracted_data else None,
+                'budget_mentioned': extracted_data.get('budget_mentioned', False) if extracted_data else False,
+                'urgency_level': extracted_data.get('urgency_level') if extracted_data else None,
             })
-            
             # Commit the transaction
             connection.commit()
             
@@ -475,7 +481,7 @@ def create_lead():
     """
     POST /leads - Create a new lead
     
-    Request body:
+    Example Request body:
     {
         "name": "Aisyah Binti Rahman",
         "phone": "0123456789",

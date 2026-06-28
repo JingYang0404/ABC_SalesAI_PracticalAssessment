@@ -118,7 +118,7 @@ class OllamaExtractor(LeadExtractor):
             )
             
             if response.status_code != 200:
-                print(f"✗ Ollama error: {response.status_code}")
+                print(f"Ollama error: {response.status_code}")
                 return self._fallback_extraction()
             
             response_text = response.json().get("response", "")
@@ -140,13 +140,13 @@ class OllamaExtractor(LeadExtractor):
                 return self._fallback_extraction()
         
         except requests.exceptions.ConnectionError:
-            print("✗ Error: Ollama not running. Start with: ollama serve")
+            print("Error: Ollama not running. Start with: ollama serve")
             return self._fallback_extraction()
         except requests.exceptions.Timeout:
-            print("✗ Error: Ollama request timeout (took >60s)")
+            print("Error: Ollama request timeout (took >60s)")
             return self._fallback_extraction()
         except Exception as e:
-            print(f"✗ Extraction error: {e}")
+            print(f"Extraction error: {e}")
             return self._fallback_extraction()
     
     def _fallback_extraction(self) -> Dict[str, Any]:
@@ -297,7 +297,7 @@ class ClaudeExtractor(LeadExtractor):
                 return self._fallback_extraction()
         
         except Exception as e:
-            print(f"✗ Claude extraction error: {e}")
+            print(f"Claude extraction error: {e}")
             return self._fallback_extraction()
     
     def _fallback_extraction(self) -> Dict[str, Any]:
@@ -346,7 +346,7 @@ class AdaptiveExtractor(LeadExtractor):
             self.ollama_extractor = OllamaExtractor(model="mistral")
             self.extractors.append(("Ollama", self.ollama_extractor))
         except Exception as e:
-            print(f"⚠ Ollama initialization warning: {e}")
+            print(f"Ollama initialization warning: {e}")
             self.ollama_extractor = None
         
         # Secondary: Try Claude if enabled (accurate but costs money)
@@ -355,7 +355,7 @@ class AdaptiveExtractor(LeadExtractor):
                 self.claude_extractor = ClaudeExtractor()
                 self.extractors.append(("Claude", self.claude_extractor))
             except Exception as e:
-                print(f"⚠ Claude initialization warning: {e}")
+                print(f"Claude initialization warning: {e}")
                 self.claude_extractor = None
         
         # Tertiary: Always have Stub as fallback (deterministic, free)
@@ -379,15 +379,15 @@ class AdaptiveExtractor(LeadExtractor):
                 
                 # Check if result has valid data (not all nulls)
                 if result and result.get("intent") is not None:
-                    print(f"✓ Success ({extractor_name})")
+                    print(f"Success ({extractor_name})")
                     return result
                 else:
-                    print(f"⚠ Empty result, trying next...")
+                    print(f"Empty result, trying next...")
                     continue
             
             except Exception as e:
                 last_error = e
-                print(f"✗ Failed ({extractor_name}: {str(e)[:50]})")
+                print(f"Failed ({extractor_name}: {str(e)[:50]})")
                 continue
         
         # If all fail, return Stub result (always works)
