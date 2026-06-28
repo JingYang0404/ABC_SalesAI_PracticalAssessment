@@ -165,25 +165,6 @@ Response (200):
   ]
 }
 ```
-
----
-
-## Running Tests
-
-```bash
-# Run Jupyter notebook with interactive tests
-jupyter notebook test_interactive.ipynb
-
-# Then run all test cells in order
-# Tests cover:
-# - Health check
-# - Lead creation (hot/warm/cold)
-# - Phone normalization
-# - Input validation
-# - Duplicate detection
-# - Failed lead tracking
-```
-
 ---
 
 ## Design Decisions
@@ -612,9 +593,161 @@ If port 11434 is in use: `taskkill /PID <process_id> /F`
 - Better: Check `netstat -ano | findstr :11434` before starting
 
 
-### Step 5: Relationship Storage (Design Explanation in README)
+## Step 5: Relationship Storage (Design Analysis)
 
-**Why Neo4j?**
+### The Problem
+
+Sales wants to understand relationships between leads:
+- Which leads mention the same product?
+- Which leads mention the same competitor?  
+- Which leads have similar intent/urgency?
+- Who mentions both competitor X and product Y?
+
+This is **relationship-shaped data** that can be queried in different ways.
+
+### Design Comparison: MySQL vs Neo4j
+
+#### Option 1: Relational Database (MySQL) + SQL Joins
+
+**How It Works:**
+```python
+# Find leads interested in same product
+SELECT DISTINCT l2.id, l2.name
+FROM leads l1
+JOIN leads l2 ON l1.extracted_product_interest = l2.extracted_product_interest
+WHERE l1.id = 123 AND l2.id != l1.id;
+```
+
+**Pros:**
+- ✅ **Already installed** - No new infrastructure
+- ✅ **Simple queries** - Basic joins for 1-2 hop relationships
+- ✅ **Proven at scale** - Works well up to millions of rows
+- ✅ **Good query optimizer** - MySQL figures out efficient plans
+- ✅ **Mature ecosystem** - Lots of tooling, documentation
+- ✅ **Low operational overhead** - Single DB to manage
+- ✅ **Cost efficient** - No extra licensing/infrastructure
+
+**Cons:**
+- ❌ **Complex queries get messy** - 3+ table joins become hard to write
+- ❌ **Deep traversals slow** - Finding all paths in 5+ hop traversal is inefficient
+- ❌ **Pattern matching limited** - "Find all leads connected through X" is awkward
+- ❌ **No graph algorithms** - Can't easily compute centrality, clustering
+- ❌ **Impedance mismatch** - Relationships are second-class (in tables, not the model)
+
+**Real Query Example (2 hops - moderate complexity):**
+```sql
+-- Find leads that mention competitor AND product (2 hops)
+SELECT DISTINCT l2.id, l2.name, l2.extracted_product_interest
+FROM leads l1
+JOIN leads l2 
+  ON l1.extracted_product_interest = l2.extracted_product_interest
+WHERE l1.id = 123 
+  AND l2.id != l1.id
+  AND FIND_IN_SET('competitor_X', l2.extracted_entities) > 0
+LIMIT 10;
+```
+
+---
+
+#### Option 2: Graph Database (Neo4j)
+
+**How It Works:**
+```cypher
+// Find leads interested in same product (single query, readable)
+MATCH (lead1:Lead {id: 123})-[:INTERESTED_IN]->(product:Product)<-[:INTERESTED_IN]-(lead2:Lead)
+RETURN lead2;
+
+// Find all paths between two leads (impossible in SQL, easy in graph)
+MATCH (l1:Lead {id: 123})-[*1..5]-(l2:Lead {id: 456})
+RETURN paths;
+```
+
+**Pros:**
+- ✅ **Natural for relationships** - Graph model matches the data shape
+- ✅ **Readable queries** - Cypher syntax mirrors actual relationships
+- ✅ **Fast traversals** - 5+ hop queries are fast (indexed edges)
+- ✅ **Pattern matching** - "Find all leads connected through X" is simple
+- ✅ **Built-in algorithms** - Centrality, clustering, recommendation already optimized
+- ✅ **Exploratory queries** - Easy to try complex patterns interactively
+- ✅ **Relationship-first** - Every relationship is indexed and queryable
+
+**Cons:**
+- ❌ **Extra infrastructure** - Need to set up Neo4j (separate DB)
+- ❌ **Data duplication** - Leads stored in both MySQL (source of truth) AND Neo4j (relationships)
+- ❌ **Sync complexity** - Must keep two DBs in sync (adds bugs)
+- ❌ **Operational overhead** - Two systems to monitor, backup, scale
+- ❌ **Learning curve** - New query language (Cypher), new concepts (nodes, edges)
+- ❌ **Overkill for simple queries** - Engineering overhead for "which leads share product X?"
+- ❌ **Cost** - Additional infrastructure, licensing (Enterprise)
+
+**Real Query Example (5 hops - would be painful in SQL):**
+```cypher
+// Find all leads that influence each other through products/entities/intents (5 hops)
+MATCH (l1:Lead {id: 123})-[*1..5]-(l2:Lead)
+WHERE l2.id != 123
+RETURN l2, length(shortestPath) AS distance
+ORDER BY distance
+LIMIT 20;
+```
+
+---
+
+### Decision Matrix: When to Use Each
+
+| Factor | MySQL Better | Neo4j Better | Notes |
+|--------|-------------|-------------|-------|
+| **Scale: # of leads** | < 100K | > 1M | Relationship density matters |
+| **Scale: # of relationships per lead** | < 5 | > 20 | Sparse vs dense graphs |
+| **Query depth** | 1-2 hops | 3+ hops | Deep traversals |
+| **Query pattern** | Simple joins | Pattern matching | Complex patterns |
+| **Operational complexity** | ✅ Low | ❌ High | Two systems to manage |
+| **Development speed** | Fast | Slower (setup) | Learning curve vs payoff |
+| **Cost** | ✅ Low | ❌ Higher | Infrastructure + licensing |
+| **Already installed?** | ✅ Yes | ❌ No | Bootstrap cost |
+
+---
+
+### This Project's Constraints
+
+**Current scale:**
+- Leads: ~100-1000 (small)
+- Relationships per lead: 1-3 (sparse)
+- Query patterns: "Find related leads" (simple)
+- Relationship depth needed: 1-2 hops (shallow)
+
+**Infrastructure:**
+- MySQL already running ✅
+- No Neo4j installed ❌
+- Setup time available? Limited (assessment deadline)
+- Sync infrastructure? None
+
+---
+
+### Honest Assessment: Which Approach?
+
+#### Use MySQL (SQL Joins) If:
+- ✅ You want to **ship quickly** (no new infrastructure)
+- ✅ Queries are **simple and well-defined** (1-2 hop joins)
+- ✅ You want **operational simplicity** (one DB to manage)
+- ✅ Scale is **small to medium** (< 100K leads)
+- ✅ You want to **avoid over-engineering** (YAGNI principle)
+
+**Assessment context:** MySQL is the right call.
+
+#### Use Neo4j If:
+- ❌ You need **deep traversals** (5+ hops)
+- ❌ You need **pattern exploration** (unknown relationship paths)
+- ❌ You already have **millions of leads** (dense relationships)
+- ❌ You need **recommendation algorithms** (PageRank, centrality)
+- ❌ You have **time to set up and sync** two databases
+
+**Assessment context:** Neo4j adds infrastructure cost that isn't justified yet.
+
+---
+
+### The Inflection Point
+
+**When would you switch from MySQL to Neo4j?**
 
 ### Step 6 - Step 7 Deeper insight queries, Batch ingest & de-duplication (Not completed)
 
