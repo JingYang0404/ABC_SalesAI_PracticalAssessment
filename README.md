@@ -58,6 +58,75 @@ mysql -u root -p < schema.sql
 #   DB_CONNECTION['user'] = 'your_user'
 #   DB_CONNECTION['password'] = 'your_password'
 ```
+## Database Schema
+
+### Overview
+
+Two tables store lead data and track failures:
+
+### Table: `leads`
+
+**Purpose:** Store successfully validated and classified leads with extracted fields.
+
+| Column | Type | Purpose |
+|--------|------|---------|
+| `id` | INT (PK) | Unique lead identifier |
+| `name` | VARCHAR(255) | Lead name (validated, no numbers) |
+| `phone_e164` | VARCHAR(20) (UNIQUE) | Normalized phone (+60123456789) |
+| `message` | TEXT | Original lead message |
+| `classification` | VARCHAR(10) | hot \| warm \| cold |
+| `created_at` | TIMESTAMP | When lead was created |
+| **Part B §4 Fields:** | | |
+| `extracted_intent` | VARCHAR(50) | purchase \| inquiry \| complaint |
+| `extracted_product_interest` | VARCHAR(255) | What product they want |
+| `extracted_entities` | JSON | Products/competitors mentioned |
+| `extracted_budget_mentioned` | BOOLEAN | Cost awareness flag |
+| `extracted_urgency_level` | VARCHAR(20) | high \| medium \| low |
+| `extracted_at` | TIMESTAMP | When extraction happened |
+
+**Why these fields?**
+- `phone_e164` (UNIQUE) → Prevents duplicate leads from same person
+- `classification` → Routes to correct sales team (hot = urgent)
+- Extracted fields → Enable relationship queries (Part B §5)
+
+---
+
+### Table: `failed_leads`
+
+**Purpose:** Audit trail of validation failures (debugging + monitoring).
+
+| Column | Type | Purpose |
+|--------|------|---------|
+| `id` | INT (PK) | Failure record ID |
+| `name` | VARCHAR(255) | What name was submitted (if any) |
+| `phone` | VARCHAR(20) | What phone was submitted (if any) |
+| `message` | TEXT | What message was submitted (if any) |
+| `error_reason` | VARCHAR(255) | Human-readable error (e.g., "Name contains numbers") |
+| `error_code` | VARCHAR(30) | Machine-readable error (e.g., "INVALID_NAME_FORMAT") |
+| `attempted_at` | TIMESTAMP | When validation failed |
+
+**Why track failures?**
+- ✅ **Debugging** - "Why did lead X fail validation?"
+- ✅ **Monitoring** - Track failure patterns (e.g., "50% fail on phone format")
+- ✅ **Data quality** - Identify upstream issues (bad data source)
+- ✅ **Operational visibility** - Team can see what's going wrong
+
+**Example failure record:**
+```json
+{
+  "id": 42,
+  "name": "Aisyah123",
+  "phone": "0123456789",
+  "message": "I want premium plan",
+  "error_reason": "Name can only contain letters, spaces, hyphens, and apostrophes (no numbers or symbols)",
+  "error_code": "INVALID_NAME_FORMAT",
+  "attempted_at": "2026-06-28T12:34:56"
+}
+```
+
+---
+
+### How Data Flows
 
 ### Optional: Setup Ollama (For Part B LLM Extraction)
 
@@ -781,6 +850,11 @@ ABC_SalesAI_PracticalAssessment/
 │                                 # - Flask, SQLAlchemy, PyMySQL
 │                                 # - phonenumbers (E.164 normalization)
 │                                 # - requests, jupyter, ipykernel
+|
+├── schema.sql                  # Database schema (optional reference)
+│                                 # - leads table: lead data + extracted fields
+│                                 # - failed_leads table: validation failure tracking
+│                                 # - Run with: mysql -u root -p < schema.sql
 │
 ├── test_interactive.ipynb      # Part A + Part B Integration Tests
 │                                 # - Setup (clear DB, init extractor)
