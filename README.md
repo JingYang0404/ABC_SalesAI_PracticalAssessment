@@ -76,7 +76,7 @@ Two tables store lead data and track failures:
 | `message` | TEXT | Original lead message |
 | `classification` | VARCHAR(10) | hot \| warm \| cold |
 | `created_at` | TIMESTAMP | When lead was created |
-| **Part B §4 Fields:** | | |
+| **Part B Step 4 Fields:** | | |
 | `extracted_intent` | VARCHAR(50) | purchase \| inquiry \| complaint |
 | `extracted_product_interest` | VARCHAR(255) | What product they want |
 | `extracted_entities` | JSON | Products/competitors mentioned |
