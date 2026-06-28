@@ -15,14 +15,22 @@ from datetime import datetime
 import phonenumbers
 import re
 from config import DB_CONNECTION, CLASSIFICATION_RULES, PHONE_DEFAULT_REGION
+from llm_extraction import AdaptiveExtractor
 
 # -----------------------------------------
 # Setup Configs
 # 1. flask app
 # 2. database URL 
+# 3. LLM Extractor
 # -----------------------------------------
 
 app = Flask(__name__)
+
+# Initialize adaptive extractor (tries Ollama, falls back to Stub)
+extractor = AdaptiveExtractor(use_claude=False)
+# Initialize adaptive extractor (tries Ollama, then to Claude, then only falls back to Stub)
+# extractor = AdaptiveExtractor(use_claude=True)
+
 
 
 # Build the database URL from config dictionary
@@ -194,7 +202,7 @@ def check_database_connection() -> bool:
         print(f"✗ Database connection check failed: {e}")
         return False
 
-def insert_lead(name: str, phone_e164: str, original_phone: str, message: str, classification: str) -> int | None:
+def insert_lead(name: str, phone_e164: str, message: str, classification: str) -> int | None:
     """
     Insert a successful lead into the leads table
     
@@ -212,15 +220,21 @@ def insert_lead(name: str, phone_e164: str, original_phone: str, message: str, c
         with engine.connect() as connection:
             # SQL INSERT query - specify database.table
             query = text("""
-                INSERT INTO leads_db.leads (name, phone_e164, original_phone, message, classification, created_at)
-                VALUES (:name, :phone_e164, :original_phone, :message, :classification, NOW())
+                        INSERT INTO leads_db.leads (
+                            name, phone_e164, message, classification, created_at,
+                            extracted_intent, extracted_product_interest, extracted_entities,
+                            extracted_budget_mentioned, extracted_urgency_level, extracted_at
+                             )
+                        VALUES (
+                            :name, :phone_e164, :message, :classification, NOW(),
+                            :intent, :product_interest, :entities, :budget_mentioned, :urgency_level, NOW()
+                        )
             """)
             
             # Execute the query with parameters
             result = connection.execute(query, {
                 'name': name,
                 'phone_e164': phone_e164,
-                'original_phone': original_phone,
                 'message': message,
                 'classification': classification
             })
@@ -230,11 +244,11 @@ def insert_lead(name: str, phone_e164: str, original_phone: str, message: str, c
             
             # Get the last inserted ID
             lead_id = result.lastrowid
-            print(f"✓ Lead created with ID: {lead_id}")
+            print(f"Lead created with ID: {lead_id}")
             return lead_id
             
     except Exception as e:
-        print(f"✗ Error inserting lead: {e}")
+        print(f"Error inserting lead: {e}")
         return None
 
 def lead_exists(phone_e164: str) -> bool | None:
@@ -286,7 +300,9 @@ def get_all_leads(classification_filter: str | None = None) -> list[dict[str, an
             # Build query based on filter - specify database.table
             if classification_filter:
                 query = text("""
-                    SELECT id, name, phone_e164, original_phone, message, classification, created_at
+                    SELECT id, name, phone_e164, message, classification, created_at,
+                           extracted_intent, extracted_product_interest, extracted_entities,
+                           extracted_budget_mentioned, extracted_urgency_level
                     FROM leads_db.leads
                     WHERE classification = :classification
                     ORDER BY created_at DESC
@@ -294,7 +310,9 @@ def get_all_leads(classification_filter: str | None = None) -> list[dict[str, an
                 result = connection.execute(query, {'classification': classification_filter})
             else:
                 query = text("""
-                    SELECT id, name, phone_e164, original_phone, message, classification, created_at
+                    SELECT id, name, phone_e164, message, classification, created_at,
+                           extracted_intent, extracted_product_interest, extracted_entities,
+                           extracted_budget_mentioned, extracted_urgency_level
                     FROM leads_db.leads
                     ORDER BY created_at DESC
                 """)
@@ -310,17 +328,23 @@ def get_all_leads(classification_filter: str | None = None) -> list[dict[str, an
                     'id': row[0],
                     'name': row[1],
                     'phone_e164': row[2],
-                    'original_phone': row[3],
-                    'message': row[4],
-                    'classification': row[5],
-                    'created_at': row[6].isoformat() if row[6] else None
+                    'message': row[3],
+                    'classification': row[4],
+                    'created_at': row[5].isoformat() if row[5] else None,
+                    'extracted': {
+                        'intent': row[6],
+                        'product_interest': row[7],
+                        'entities': json.loads(row[8]) if row[8] else [],
+                        'budget_mentioned': row[9],
+                        'urgency_level': row[10]
+                    }
                 })
             
-            print(f"✓ Retrieved {len(leads)} leads from database")
+            print(f"Retrieved {len(leads)} leads from database")
             return leads
             
     except Exception as e:
-        print(f"✗ Error fetching leads: {e}")
+        print(f"Error fetching leads: {e}")
         return None
 
 def insert_failed_lead(name: str | None, phone: str | None, message: str | None, error_reason: str, error_code: str) -> bool:
@@ -466,60 +490,60 @@ def create_lead():
         500 Internal Server Error - Database error
     """
     
-    # Step 0: Check if database is available (FIRST check!)
+    # Step 1: Check database
     if not check_database_connection():
-        return jsonify({
-            "error": "Database service is unavailable",
-            "code": "DATABASE_UNAVAILABLE"
-        }), 500
+        return jsonify({"error": "Database unavailable", "code": "DATABASE_UNAVAILABLE"}), 500
     
-    # Step 1: Get JSON data from request
+    # Step 2: Get JSON from the response
     data = request.get_json()
-    
     if not data:
         return jsonify({"error": "Request body must be JSON"}), 400
     
-    # Step 2: Validate input
+    # Step 3: Validate input
     is_valid, error_msg, error_code = validate_lead_input(data)
     if not is_valid:
         insert_failed_lead(data.get('name'), data.get('phone'), data.get('message'), error_msg, error_code)
         return jsonify({"error": error_msg, "code": error_code}), 400
     
-    # Step 3: Normalize phone number
+    # Step 4: Normalize phone
     phone_e164, phone_error = normalize_phone(data['phone'])
     if phone_error:
         insert_failed_lead(data['name'], data['phone'], data['message'], phone_error, "INVALID_PHONE_FORMAT")
         return jsonify({"error": f"Phone normalization failed: {phone_error}", "code": "INVALID_PHONE_FORMAT"}), 422
     
-    # Step 4: Check for duplicate
+    # Step 5: Check duplicate
     duplicate_exists = lead_exists(phone_e164)
     if duplicate_exists is None:
-        # Database error
         insert_failed_lead(data['name'], phone_e164, data['message'], "Database error checking duplicates", "DATABASE_ERROR")
         return jsonify({"error": "Failed to check for duplicates", "code": "DATABASE_ERROR"}), 500
     elif duplicate_exists:
         insert_failed_lead(data['name'], phone_e164, data['message'], "Lead with this phone already exists", "DUPLICATE_LEAD")
         return jsonify({"error": "Lead with this phone number already exists", "code": "DUPLICATE_LEAD"}), 409
     
-    # Step 5: Classify the lead
+    # Step 6: Classify the lead
     classification = classify_lead(data['message'])
+
+    # Step 7: EXTRACT (with adaptive fallback) ← HERE!
+    extracted_data = extractor.extract(data['name'], phone_e164, data['message'])
+    print(f"✓ Extracted: {extracted_data}")
     
-    # Step 6: Insert into database
-    lead_id = insert_lead(data['name'], phone_e164, data['phone'], data['message'], classification)
+    # Step 8: Insert into database
+    lead_id = insert_lead(data['name'], phone_e164, data['message'], classification, extracted_data)
     if lead_id is None:
         insert_failed_lead(data['name'], phone_e164, data['message'], "Failed to insert into database", "DATABASE_ERROR")
         return jsonify({"error": "Failed to create lead", "code": "DATABASE_ERROR"}), 500
     
-    # Step 7: Return created lead with REAL ID from database
+    # Step 9: Return response
     return jsonify({
         "id": lead_id,
         "name": data['name'],
         "phone_e164": phone_e164,
-        "original_phone": data['phone'],
-        "message": data['message'],
         "classification": classification,
+        "extracted": extracted_data,  # LLM Extraction results !!!
         "created_at": datetime.now().isoformat()
-    }), 201
+    }), 201 # Sucess
+
+
 
 @app.route('/leads', methods=['GET'])
 def get_leads():
