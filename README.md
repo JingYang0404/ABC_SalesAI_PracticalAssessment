@@ -12,8 +12,12 @@ A Flask-based backend service for ingesting, validating, classifying, and storin
   - Error tracking
   
 - 🚧 **Part B (Extensions)** — In Progress
-  - §4: LLM extraction (planned)
-  - §5: Relationship storage explanation (Neo4j)
+  - Step 4: LLM extraction (Completed)
+      - Adaptive LLM Extraction Models
+      - Extracted Fields (
+  - Step 5: Relationship storage explanation (Neo4j)
+  - Step 6: Deeper insight queries (Not Completed)
+  - Step 7: Batch ingest & de-duplication (Not Completed)
 
 ---
 
@@ -23,7 +27,8 @@ A Flask-based backend service for ingesting, validating, classifying, and storin
 
 - Python 3.10+ (required for type hint syntax `str | None`)
 - MySQL 5.7+
-- pip
+- OLLAMA model (phi, LLAMA3.2, mistral)
+- LLM API key (optional)
 
 ### Installation
 
@@ -196,26 +201,12 @@ jupyter notebook test_interactive.ipynb
 
 ---
 
-## Project Structure
-
-```
-ABC_SalesAI_PracticalAssessment/
-├── app.py                    # Main Flask application
-├── config.py                 # Configuration (DB, rules, etc)
-├── extraction.py             # LLM extraction interface (Part B)
-├── requirements.txt          # Dependencies
-├── test_interactive.ipynb    # Interactive Jupyter tests
-├── README.md                 # This file
-└── schema.sql                # Database schema
-```
-
----
 
 ## Part B: Extensions (Planned)
 
-### §4: LLM Extraction (In Progress)
+### Step 4: LLM Extraction (Completed)
 
-**What**: Extract structured fields from free-text messages using Claude API.
+**What**: Extract structured fields from free-text messages using OLLAMA, Claude and Stub (fallback, manually designed).
 
 **Fields extracted**:
 - `intent`: purchase | inquiry | complaint | null
@@ -235,88 +226,163 @@ ABC_SalesAI_PracticalAssessment/
 - Message wrapped in `MESSAGE START`/`MESSAGE END` delimiters
 - LLM instructed to respond only with JSON (no markdown)
 
-### §5: Relationship Storage (Design Explanation in README)
+### Current Implementation
+- OllamaExtractor (local, phi model)
+- StubExtractor (fallback)
+
+### Optional: Claude Integration
+ClaudeExtractor available but not enabled to avoid API costs.
+To use: Set ANTHROPIC_API_KEY env var and pass use_claude=True
+
+
+### Step 5: Relationship Storage (Design Explanation in README)
 
 **Why Neo4j?**
 
-At the scale of this exercise (hundreds to low thousands of leads), Neo4j makes sense if you need:
-- Multi-hop relationships: "leads interested in Product X, who mention Competitor Y"
-- Entity connections: shared products, shared intent, shared competitors
-- Real-time graph traversals: `MATCH (l1:Lead)-[:INTERESTED_IN]->(:Product)<-[:INTERESTED_IN]-(l2:Lead) RETURN l2`
+### Step 6 - Step 7 Deeper insight queries, Batch ingest & de-duplication (Not completed)
 
-**Graph Model**:
+-- None --
+
+---
+
+## Project Structure
 ```
-Lead --[INTERESTED_IN]--> Product
-Lead --[MENTIONS]--> Competitor
-Lead --[HAS_INTENT]--> Intent
-```
-
-**Trade-offs**:
-
-| Factor | Relational (SQLite/MySQL) | Graph (Neo4j) |
-|--------|---------------------------|---------------|
-| Simple queries | ✅ Better | ❌ Overkill |
-| Multi-hop joins | ❌ Expensive | ✅ Native |
-| Operational complexity | ✅ Simple | ❌ Extra service |
-| Query latency (single hop) | ✅ Fast | ✅ Fast |
-| Query latency (3+ hops) | ❌ Slow | ✅ Fast |
-| Scalability | ✅ To 1M rows | ✅ To 1B nodes |
-
-**When to flip**: If you need traversals deeper than 2-3 hops, or if you have >100k entities with dense relationship graphs, Neo4j wins. For this exercise, relational with denormalized entity columns is sufficient, but a graph model is architecturally cleaner for relationship-heavy queries.
-
-**Queries we'd build**:
-```cypher
--- Find leads interested in Product X
-MATCH (l:Lead)-[:INTERESTED_IN]->(:Product {name: "Premium Plan"})
-RETURN l
-
--- Find leads that mention competitors mentioned by Lead #5
-MATCH (lead5:Lead)-[:MENTIONS]->(comp:Competitor)<-[:MENTIONS]-(other:Lead)
-RETURN DISTINCT other
+ABC_SalesAI_PracticalAssessment/
+├── app.py                      # Main Flask application
+│                                 # - 4 endpoints: POST/GET /leads, GET /failed_leads, GET /health
+│                                 # - Part B integration: AdaptiveExtractor for lead extraction
+│                                 # - Error handling: 201, 400, 409, 422, 500
+│
+├── config.py                   # Configuration (centralized)
+│                                 # - DB_CONNECTION: MySQL host, user, password, port
+│                                 # - CLASSIFICATION_RULES: hot/warm/cold keywords (configurable)
+│                                 # - PHONE_DEFAULT_REGION: 'MY' for Malaysia
+│                                 # - LLLM Api key (optional)  
+│
+├── llm_extraction.py           # Part B: LLM Extraction Interface
+│                                 # - LeadExtractor (ABC): Abstract base class
+│                                 # - OllamaExtractor: Local LLM (phi model via Ollama)
+│                                 # - StubExtractor: Deterministic fallback for testing
+│                                 # - ClaudeExtractor: Claude LLM
+│                                 # - AdaptiveExtractor: Intelligent orchestration
+│                                 # - Injection safety: MESSAGE START/END delimiters
+│
+├── requirements.txt            # Python dependencies
+│                                 # - Flask, SQLAlchemy, PyMySQL
+│                                 # - phonenumbers (E.164 normalization)
+│                                 # - requests, jupyter, ipykernel
+│
+├── test_interactive.ipynb      # Part A + Part B Integration Tests
+│                                 # - Setup (clear DB, init extractor)
+│                                 # - Lead creation (HOT/WARM/COLD with extraction)
+│                                 # - Validation, filtering, injection safety, custom testing
+│                                 # - View all leads with extracted data
+│
+├── llm_test.ipynb              # Part B: LLM Extraction Unit Tests
+│                                 # - Setup, Ollama connection check
+│                                 # - Extraction tests (HOT/WARM/COLD, entities, edge cases)
+│                                 # - CRITICAL - Injection safety proof
+│                                 # - Special characters, minimal messages, custom testing
+│
+├── schema.sql                  # Database Schema (optional reference) [using mysql]
+│                                 # - leads table: id, name, phone_e164, message, classification
+│                                 # - Part B additions: extracted_intent, extracted_product_interest, etc
+│                                 # - failed_leads table: validation failure tracking
+│
+└── README.md                    # Complete documentation
 ```
 
 ---
 
-## What I'd Do Next (If Continuing)
+## What I'd Do Next (If Continuing), and reason for stopping :
 
-1. **§4 Complete**
-   - Add real Claude API calls (behind config flag)
-   - Store extracted fields in `leads` table
-   - Return extracted data in GET /leads responses
-   - Add extraction to POST /leads response
-
-2. **§5 Implementation** (if time)
+1. **Step 5 Implementation** (if time)
    - Add Neo4j connection pool
    - Build entity graph from extracted fields
    - Implement `GET /leads/{id}/related` endpoint
    - Add aggregation queries
 
-3. **§6 & §7**
+2. **Step 6 & Step 7**
    - Multi-hop traversal queries
    - Batch import endpoint
    - Deduplication across batch
 
+## Implementation Timeline & Constraints
+
+**Part A (Core):** Completed Saturday - All requirements delivered and tested ✅
+
+**Part B §4 (LLM Extraction):** Saturday-Sunday
+
+**Challenges Encountered & Solutions:**
+
+1. **Personal (Saturday):** Fell ill with flu - Lost ~10 hours of development time, unable to focus and work efficiently
+   - **Solution:** Continued work Sunday with focus on architecture + testing
+   
+2. **Technical (Ollama Setup):** 
+   - llama3.2 model (4GB) exceeded GPU VRAM on RTX 3050
+   - Ollama port conflicts after system crash
+   - **Solution:** Debugged system processes, switched to phi model (1.6GB)
+   
+3. **Learning Curve:** First experience with Flask APIs + LLM integration
+   - **Solution:** Built clean architecture first (LeadExtractor ABC), then implemented providers
+   - **Outcome:** Designed production-ready system with graceful fallbacks
+
+4. **Priority Decision:** Extensive testing vs. rushing implementation
+   - **Decision:** Chose quality - Built both unit tests (llm_test.ipynb) + integration tests (test_interactive.ipynb)
+   - **Outcome:** Injection safety proven at two levels, architecture validated
+
+**This means:**
+- ✅ API works even if Ollama crashes or isn't installed
+- ✅ Tests pass without any LLM (using Stub)
+- ✅ Stores failed leads to further tract design flaws
+
+**Result:**
+Despite time and system constraints, delivered:
+- ✅ **Production-ready extraction architecture** with zero-failure guarantee
+- ✅ **AdaptiveExtractor** that works with OR without LLM
+- ✅ Proven injection safety (both function + endpoint levels)
+- ✅ Comprehensive test coverage (unit + integration)
+- ✅ All Part A requirements + Part B Step 4 integration
+- ✅ System resilience - API continues functioning even when LLM unavailable
+
 ---
 
 ## Testing
+There are two types of tesing, one for api testing with leads, the other is for LLM extraction.
 
-All tests are in `test_interactive.ipynb`. Run cells in order:
-
+## (A). API and Leads Testing (`test_interactive.ipynb`)
+Comprehensive integration tests for the complete Flask API.
+Run cells in order:
+:
 1. **Setup** — Load dependencies and set BASE_URL
 2. **Health check** — Verify API is running
 3. **Lead creation** — Test hot/warm/cold classification
 4. **Validation** — Test error cases (missing fields, invalid phone, etc)
 5. **Filtering** — Test GET /leads?status=X
-6. **Injection safety** — Prove prompt injection doesn't hijack extraction (Part B)
+6. **Injection safety** — Prove POST /leads endpoint is injection-safe (integration test) (Part B)
+7. **Custom Testing** — Test if custom message works in creating leads
+   
+(B). LLM Extraction Testing (`llm_test.ipynb`)
+  For LLM Extraction Testing are in `llm_test.ipynb `. Run cells in order:
 
+1. **Setup** — Load dependencies, set OLLAMA_URL and OLLAMA_MODEL
+2. **OLLAMA Connection Check** — Verify Ollama is running and models are available
+3. **Extraction Function** — Initialize AdaptiveExtractor from llm_extraction.py
+4. **HOT Lead Test** — Test extraction on purchase-intent message
+5. **WARM Lead Test** — Test extraction on inquiry message
+6. **COLD Lead Test** — Test extraction on generic message
+7. **Multiple Entities Test** — Test extraction with products/competitors mentioned
+8. **Injection Safety Test** — Prove prompt injection doesn't hijack extraction (CRITICAL)
+9. **Special Characters Test** — Test with emojis, symbols, numbers
+10. **Minimal Message Test** — Test edge cases (empty, "ok", "yes")
 ---
 
 ## Deployment Notes
 
 - **Database**: Recommend managed MySQL (AWS RDS, Google Cloud SQL) in production
-- **Secrets**: Never commit `config.py` with real credentials; use environment variables
+- **Secrets**: Never commit `config.py` with real credentials; use environment variables, in this case credentials in `config.py` was created solely for this project
 - **Logging**: Add structured logging (JSON) for operational monitoring
-- **Monitoring**: Track `/failed_leads` endpoint for validation trends
+- **Monitoring**: Track `/failed_leads` endpoint for failed leads and track reason
 
 ---
 
