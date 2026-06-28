@@ -157,6 +157,10 @@ def validate_lead_input(data: any) -> tuple[bool, str | None, str | None]:
     if not re.search(r"[a-zA-Z0-9]", data['message']):
         return False, "Message must contain at least some words or numbers (cannot be all symbols)", "INVALID_MESSAGE_FORMAT"
     
+    # Validate message length
+    if len(data['message']) > 5000:  # Or whatever limit you want
+        return False, "Message too long (max 5000 characters)", "MESSAGE_TOO_LONG"
+        
     return True, None, None
 
 def classify_lead(message: str) -> str:
